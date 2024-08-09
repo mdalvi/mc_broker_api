@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "zerodha-api"
+version = "0.1.10"
+description = "Wrapper for Zerodha Kite API"
+authors = ["mdalvi <milind.dalvi@protonmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+kiteconnect = "^5.0.1"
+redis = "^5.0.7"
+celery = "^5.4.0"
+black = "^24.4.2"
+pytest = "^8.3.2"
+pyyaml = "^6.0.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.3.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
