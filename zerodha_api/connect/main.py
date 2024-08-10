@@ -1,12 +1,21 @@
+import time
+from datetime import datetime, timedelta
+from typing import Tuple, Optional
+
+import pandas as pd
 from cryptography.fernet import Fernet
 from kiteconnect import KiteConnect
+from kiteconnect.exceptions import DataException, GeneralException, NetworkException
 from redis import Redis
 
+from zerodha_api.settings import KITE_HISTORICAL_API_RATE_LIMIT
 from zerodha_api.settings import (
     get_fernet_secret,
     get_configuration,
 )
 from zerodha_api.settings import get_logger
+from zerodha_api.utils.datetime import get_date_now
+from zerodha_api.utils.requests import retry
 
 logger = get_logger()
 
@@ -44,6 +53,9 @@ class Connect:
             "decode_responses": True,
         }
         self.redis_client = Redis(**redis_config)
+
+        # Extras
+        self.KITE_HISTORICAL_DATA_REQUEST_INTERVAL_LIMIT = 60  # days
 
         # Products
         self.PRODUCT_MIS = self.kite.PRODUCT_MIS
@@ -108,14 +120,190 @@ class Connect:
         self.GTT_STATUS_REJECTED = self.kite.GTT_STATUS_REJECTED
         self.GTT_STATUS_DELETED = self.kite.GTT_STATUS_DELETED
 
-    def historical_data(self, *args, **kwargs):
-        """
-        https://kite.trade/docs/pykiteconnect/v4/#kiteconnect.KiteConnect.historical_data
-        :param args:
-        :param kwargs:
-        :return:
-        """
+    @retry((DataException, NetworkException, GeneralException), tries=5, delay=5)
+    def _historical_data(self, *args, **kwargs):
         return self.kite.historical_data(*args, **kwargs)
+
+    def _get_historical_step2(
+        self,
+        instrument_token: int,
+        from_date: datetime.date,
+        to_date: datetime.date,
+        interval: str,
+        continuous: bool,
+        oi: bool,
+    ) -> Tuple[pd.DataFrame, bool]:
+
+        # Check Redis for the last API call timestamp
+        recent_call_timestamp: str = self.redis_client.get(
+            KITE_HISTORICAL_API_RATE_LIMIT
+        )
+
+        if recent_call_timestamp:
+            # Calculate the time difference from the last API call
+            elapsed_time = time.time() - float(recent_call_timestamp)
+            # If the elapsed time is less than the required delay (1/3 second), wait
+            # See https://kite.trade/docs/connect/v3/exceptions/ for more details
+            if elapsed_time < 1 / 3:
+                time.sleep(1 / 3 - elapsed_time)
+
+        historical_df = pd.DataFrame(
+            self._historical_data(
+                instrument_token=instrument_token,
+                from_date=from_date,
+                to_date=to_date,
+                interval=interval,
+                continuous=continuous,
+                oi=oi,
+            )
+        )
+
+        # Update Redis with the current timestamp of the API call
+        self.redis_client.set(KITE_HISTORICAL_API_RATE_LIMIT, time.time())
+
+        if historical_df.shape[0] == 0:
+            logger.info(
+                f"kc:__get_historical_step2: no further historical data found for {instrument_token}"
+            )
+            return pd.DataFrame(), False
+
+        # Renaming data columns from API results
+        historical_df.rename(
+            columns={
+                "date": "record_datetime",
+                "open": "open_price",
+                "high": "high_price",
+                "low": "low_price",
+                "close": "close_price",
+            },
+            inplace=True,
+        )
+        historical_df["instrument_token"] = instrument_token
+        historical_df["interval"] = interval
+        logger.info(
+            f"kc:__get_historical_step2: retrieved  further historical data found for {instrument_token}"
+        )
+        return historical_df, True
+
+    def _get_historical_step1(
+        self,
+        instrument_token: int,
+        from_date: datetime.date,
+        to_date: datetime.date,
+        interval: str,
+        continuous: bool,
+        oi: bool,
+    ) -> pd.DataFrame:
+        dt_diff = (to_date - from_date).days
+        threshold_limit = self.KITE_HISTORICAL_DATA_REQUEST_INTERVAL_LIMIT
+        historical_dfs = []
+        if dt_diff > threshold_limit:
+            logger.info(
+                f"kc:__get_historical_step1: date difference of {dt_diff} > {threshold_limit} days, requesting data in chunks"
+            )
+
+            is_break = False
+            while True:
+                if (to_date - from_date).days > threshold_limit:
+                    fd_new = to_date - timedelta(days=threshold_limit)
+                    fd_new = datetime.strptime(
+                        fd_new.strftime("%Y-%m-%d") + " 00:00:00", "%Y-%m-%d %H:%M:%S"
+                    )
+                else:
+                    fd_new = to_date - timedelta(days=(to_date - from_date).days)
+                    fd_new = datetime.strptime(
+                        fd_new.strftime("%Y-%m-%d") + " 00:00:00", "%Y-%m-%d %H:%M:%S"
+                    )
+                    is_break = True
+
+                logger.info(
+                    f"kc:__get_historical_step1: getting historical data from {fd_new} to {to_date}"
+                )
+                historical_df, has_data = self._get_historical_step2(
+                    instrument_token, fd_new, to_date, interval, continuous, oi
+                )
+
+                if has_data:
+                    historical_dfs.append(historical_df)
+
+                if is_break:
+                    break
+
+                if not has_data:
+                    break
+
+                to_date = fd_new
+                to_date = datetime.strptime(
+                    to_date.strftime("%Y-%m-%d") + " 23:59:59", "%Y-%m-%d %H:%M:%S"
+                )
+        else:
+            logger.info(
+                f"kc:__get_historical_step1: getting historical data from {from_date} to {to_date}"
+            )
+            historical_df, _ = self._get_historical_step2(
+                instrument_token, from_date, to_date, interval, continuous, oi
+            )
+            historical_dfs.append(historical_df)
+
+        hist_final_df = pd.concat(historical_dfs)
+        hist_final_df["record_datetime"] = pd.to_datetime(
+            hist_final_df["record_datetime"]
+        )
+        hist_final_df.drop_duplicates(inplace=True)
+        hist_final_df.reset_index(drop=True, inplace=True)
+        hist_final_df["record_date"] = hist_final_df["record_datetime"].dt.date
+        hist_final_df["record_time"] = hist_final_df["record_datetime"].dt.time
+        hist_final_df["record_day"] = hist_final_df["record_datetime"].dt.day
+        hist_final_df["record_month"] = hist_final_df["record_datetime"].dt.month
+        hist_final_df["record_year"] = hist_final_df["record_datetime"].dt.year
+        hist_final_df["record_weekday"] = hist_final_df["record_datetime"].dt.weekday
+        hist_final_df["record_week_of_year"] = (
+            hist_final_df["record_datetime"].dt.isocalendar().week
+        )
+        return hist_final_df
+
+    def historical_data(
+        self,
+        instrument_token: int,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        interval: str = "day",
+        continuous: bool = False,
+        oi: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Fetches historical market data for a given instrument within a specified date range and interval.
+        Extension of https://kite.trade/docs/pykiteconnect/v4/#kiteconnect.KiteConnect.historical_data
+
+        :param instrument_token: The instrument token for which to fetch data.
+        :param from_date:  The start date for the data retrieval in 'YYYY-MM-DD' format.
+        :param to_date: The end date for the data retrieval in 'YYYY-MM-DD' format.
+        :param interval: The time interval for the data (e.g., 'day', '15minute'. '5minute'). Defaults to 'day'.
+        :param continuous: Whether to fetch continuous data for futures. Defaults to False.
+        :param oi: Whether to include open interest data. Defaults to False.
+        :return: pd.DataFrame: A DataFrame containing the historical market data.
+        """
+        if from_date is None:
+            from_date = (
+                get_date_now(self.config["timezone"]) - timedelta(days=5)
+            ).strftime("%Y-%m-%d")
+            from_date = datetime.strptime(from_date + " 00:00:00", "%Y-%m-%d %H:%M:%S")
+        else:
+            from_date = datetime.strptime(from_date + " 00:00:00", "%Y-%m-%d %H:%M:%S")
+
+        if to_date is None:
+            to_date = (
+                get_date_now(self.config["timezone"]) - timedelta(days=1)
+            ).strftime("%Y-%m-%d")
+            to_date = datetime.strptime(to_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+        else:
+            to_date = datetime.strptime(to_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+
+        assert instrument_token is not None, "Attribute `instrument` cannot be None"
+        assert interval is not None, "Attribute `interval` cannot be None"
+        return self._get_historical_step1(
+            instrument_token, from_date, to_date, interval, continuous, oi
+        )
 
     def instruments(self, *args, **kwargs):
         """

@@ -15,6 +15,8 @@ KITE_SUBSCRIPTIONS: str = "kt:data:subscriptions"
 KITE_TICK_DATA: str = "kt:data:tick_data"
 KITE_SNAPSHOT_DATA: str = "kt:data:snapshot_data"
 
+KITE_HISTORICAL_API_RATE_LIMIT = "kc:rate_limit:historical_api"
+
 
 def get_configuration() -> dict:
     """
