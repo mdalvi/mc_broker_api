@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet
 from kiteconnect import KiteConnect
 from kiteconnect.exceptions import DataException, GeneralException, NetworkException
 from redis import Redis
+from retrying import retry
 
 from zerodha_api.settings import KITE_HISTORICAL_API_RATE_LIMIT
 from zerodha_api.settings import (
@@ -15,19 +16,18 @@ from zerodha_api.settings import (
 )
 from zerodha_api.settings import get_logger
 from zerodha_api.utils.datetime import get_date_now
-from zerodha_api.utils.requests import retry
 
 logger = get_logger()
 
 
 class Connect:
     def __init__(
-        self,
-        token: str,
-        redis_host: str = "127.0.0.1",
-        redis_password: str = "",
-        redis_port: int = 6379,
-        redis_db: int = 0,
+            self,
+            token: str,
+            redis_host: str = "127.0.0.1",
+            redis_password: str = "",
+            redis_port: int = 6379,
+            redis_db: int = 0,
     ):
         """
         A class that initializes and manages a KiteConnect connection and Redis client for market data processing.
@@ -120,18 +120,23 @@ class Connect:
         self.GTT_STATUS_REJECTED = self.kite.GTT_STATUS_REJECTED
         self.GTT_STATUS_DELETED = self.kite.GTT_STATUS_DELETED
 
-    @retry((DataException, NetworkException, GeneralException), tries=5, delay=5)
+    # Function to check if the exception should trigger a retry
+    @staticmethod
+    def retry_if_exception(exception):
+        return isinstance(exception, (DataException, NetworkException, GeneralException))
+
+    @retry(stop_max_attempt_number=5, wait_fixed=5000, retry_on_exception=retry_if_exception)
     def _historical_data(self, *args, **kwargs):
         return self.kite.historical_data(*args, **kwargs)
 
     def _get_historical_step2(
-        self,
-        instrument_token: int,
-        from_date: datetime.date,
-        to_date: datetime.date,
-        interval: str,
-        continuous: bool,
-        oi: bool,
+            self,
+            instrument_token: int,
+            from_date: datetime.date,
+            to_date: datetime.date,
+            interval: str,
+            continuous: bool,
+            oi: bool,
     ) -> Tuple[pd.DataFrame, bool]:
 
         # Check Redis for the last API call timestamp
@@ -186,13 +191,13 @@ class Connect:
         return historical_df, True
 
     def _get_historical_step1(
-        self,
-        instrument_token: int,
-        from_date: datetime.date,
-        to_date: datetime.date,
-        interval: str,
-        continuous: bool,
-        oi: bool,
+            self,
+            instrument_token: int,
+            from_date: datetime.date,
+            to_date: datetime.date,
+            interval: str,
+            continuous: bool,
+            oi: bool,
     ) -> pd.DataFrame:
         dt_diff = (to_date - from_date).days
         threshold_limit = self.KITE_HISTORICAL_DATA_REQUEST_INTERVAL_LIMIT
@@ -263,13 +268,13 @@ class Connect:
         return hist_final_df
 
     def historical_data(
-        self,
-        instrument_token: int,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-        interval: str = "day",
-        continuous: bool = False,
-        oi: bool = False,
+            self,
+            instrument_token: int,
+            from_date: Optional[str] = None,
+            to_date: Optional[str] = None,
+            interval: str = "day",
+            continuous: bool = False,
+            oi: bool = False,
     ) -> pd.DataFrame:
         """
         Fetches historical market data for a given instrument within a specified date range and interval.
@@ -285,7 +290,7 @@ class Connect:
         """
         if from_date is None:
             from_date = (
-                get_date_now(self.config["timezone"]) - timedelta(days=5)
+                    get_date_now(self.config["timezone"]) - timedelta(days=5)
             ).strftime("%Y-%m-%d")
             from_date = datetime.strptime(from_date + " 00:00:00", "%Y-%m-%d %H:%M:%S")
         else:
@@ -293,7 +298,7 @@ class Connect:
 
         if to_date is None:
             to_date = (
-                get_date_now(self.config["timezone"]) - timedelta(days=1)
+                    get_date_now(self.config["timezone"]) - timedelta(days=1)
             ).strftime("%Y-%m-%d")
             to_date = datetime.strptime(to_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
         else:
