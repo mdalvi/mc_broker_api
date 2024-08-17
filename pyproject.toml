@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "zerodha-api"
-version = "0.1.22"
+version = "0.1.24"
 description = "Wrapper for Zerodha Kite API"
 authors = ["mdalvi <milind.dalvi@protonmail.com>"]
 license = "MIT"

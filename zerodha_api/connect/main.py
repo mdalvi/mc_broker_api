@@ -23,12 +23,12 @@ logger = get_logger()
 
 class Connect:
     def __init__(
-        self,
-        token: str,
-        redis_host: str = "127.0.0.1",
-        redis_password: str = "",
-        redis_port: int = 6379,
-        redis_db: int = 0,
+            self,
+            token: str,
+            redis_host: str = "127.0.0.1",
+            redis_password: str = "",
+            redis_port: int = 6379,
+            redis_db: int = 0,
     ):
         """
         A class that initializes and manages a KiteConnect connection and Redis client for market data processing.
@@ -137,13 +137,13 @@ class Connect:
         return self.kite.historical_data(*args, **kwargs)
 
     def _get_historical_step2(
-        self,
-        instrument_token: int,
-        from_date: datetime.date,
-        to_date: datetime.date,
-        interval: str,
-        continuous: bool,
-        oi: bool,
+            self,
+            instrument_token: int,
+            from_date: datetime.date,
+            to_date: datetime.date,
+            interval: str,
+            continuous: bool,
+            oi: bool,
     ) -> Tuple[pd.DataFrame, bool]:
 
         # Check Redis for the last API call timestamp
@@ -198,13 +198,13 @@ class Connect:
         return historical_df, True
 
     def _get_historical_step1(
-        self,
-        instrument_token: int,
-        from_date: datetime.date,
-        to_date: datetime.date,
-        interval: str,
-        continuous: bool,
-        oi: bool,
+            self,
+            instrument_token: int,
+            from_date: datetime.date,
+            to_date: datetime.date,
+            interval: str,
+            continuous: bool,
+            oi: bool,
     ) -> pd.DataFrame:
         dt_diff = (to_date - from_date).days
         threshold_limit = self.KITE_HISTORICAL_DATA_REQUEST_INTERVAL_LIMIT
@@ -275,13 +275,13 @@ class Connect:
         return hist_final_df
 
     def historical_data(
-        self,
-        instrument_token: int,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-        interval: str = "day",
-        continuous: bool = False,
-        oi: bool = False,
+            self,
+            instrument_token: int,
+            from_date: Optional[str] = None,
+            to_date: Optional[str] = None,
+            interval: str = "day",
+            continuous: bool = False,
+            oi: bool = True,
     ) -> pd.DataFrame:
         """
         Fetches historical market data for a given instrument within a specified date range and interval.
@@ -289,15 +289,17 @@ class Connect:
 
         :param instrument_token: The instrument token for which to fetch data.
         :param from_date:  The start date for the data retrieval in 'YYYY-MM-DD' format.
+                If the value is 'None' then by default last 5 calendar days data is fetched
         :param to_date: The end date for the data retrieval in 'YYYY-MM-DD' format.
+                If the value is 'None" then by default the to_date is yesterday's date.
         :param interval: The time interval for the data (e.g., 'day', '15minute'. '5minute'). Defaults to 'day'.
         :param continuous: Whether to fetch continuous data for futures. Defaults to False.
-        :param oi: Whether to include open interest data. Defaults to False.
+        :param oi: Whether to include open interest data. Defaults to True.
         :return: pd.DataFrame: A DataFrame containing the historical market data.
         """
         if from_date is None:
             from_date = (
-                get_date_now(self.config["timezone"]) - timedelta(days=5)
+                    get_date_now(self.config["timezone"]) - timedelta(days=5)
             ).strftime("%Y-%m-%d")
             from_date = datetime.strptime(from_date + " 00:00:00", "%Y-%m-%d %H:%M:%S")
         else:
@@ -305,7 +307,7 @@ class Connect:
 
         if to_date is None:
             to_date = (
-                get_date_now(self.config["timezone"]) - timedelta(days=1)
+                    get_date_now(self.config["timezone"]) - timedelta(days=1)
             ).strftime("%Y-%m-%d")
             to_date = datetime.strptime(to_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
         else:
