@@ -23,12 +23,12 @@ logger = get_logger()
 
 class Connect:
     def __init__(
-            self,
-            token: str,
-            redis_host: str = "127.0.0.1",
-            redis_password: str = "",
-            redis_port: int = 6379,
-            redis_db: int = 0,
+        self,
+        token: str,
+        redis_host: str = "127.0.0.1",
+        redis_password: str = "",
+        redis_port: int = 6379,
+        redis_db: int = 0,
     ):
         """
         A class that initializes and manages a KiteConnect connection and Redis client for market data processing.
@@ -137,13 +137,13 @@ class Connect:
         return self.kite.historical_data(*args, **kwargs)
 
     def _get_historical_step2(
-            self,
-            instrument_token: int,
-            from_date: datetime.date,
-            to_date: datetime.date,
-            interval: str,
-            continuous: bool,
-            oi: bool,
+        self,
+        instrument_token: int,
+        from_date: datetime.date,
+        to_date: datetime.date,
+        interval: str,
+        continuous: bool,
+        oi: bool,
     ) -> Tuple[pd.DataFrame, bool]:
 
         # Check Redis for the last API call timestamp
@@ -198,13 +198,13 @@ class Connect:
         return historical_df, True
 
     def _get_historical_step1(
-            self,
-            instrument_token: int,
-            from_date: datetime.date,
-            to_date: datetime.date,
-            interval: str,
-            continuous: bool,
-            oi: bool,
+        self,
+        instrument_token: int,
+        from_date: datetime.date,
+        to_date: datetime.date,
+        interval: str,
+        continuous: bool,
+        oi: bool,
     ) -> pd.DataFrame:
         dt_diff = (to_date - from_date).days
         threshold_limit = self.KITE_HISTORICAL_DATA_REQUEST_INTERVAL_LIMIT
@@ -275,13 +275,13 @@ class Connect:
         return hist_final_df
 
     def historical_data(
-            self,
-            instrument_token: int,
-            from_date: Optional[str] = None,
-            to_date: Optional[str] = None,
-            interval: str = "day",
-            continuous: bool = False,
-            oi: bool = True,
+        self,
+        instrument_token: int,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        interval: str = "day",
+        continuous: bool = False,
+        oi: bool = True,
     ) -> pd.DataFrame:
         """
         Fetches historical market data for a given instrument within a specified date range and interval.
@@ -299,7 +299,7 @@ class Connect:
         """
         if from_date is None:
             from_date = (
-                    get_date_now(self.config["timezone"]) - timedelta(days=5)
+                get_date_now(self.config["timezone"]) - timedelta(days=5)
             ).strftime("%Y-%m-%d")
             from_date = datetime.strptime(from_date + " 00:00:00", "%Y-%m-%d %H:%M:%S")
         else:
@@ -307,7 +307,7 @@ class Connect:
 
         if to_date is None:
             to_date = (
-                    get_date_now(self.config["timezone"]) - timedelta(days=1)
+                get_date_now(self.config["timezone"]) - timedelta(days=1)
             ).strftime("%Y-%m-%d")
             to_date = datetime.strptime(to_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
         else:
@@ -315,9 +315,18 @@ class Connect:
 
         assert instrument_token is not None, "Attribute `instrument` cannot be None"
         assert interval is not None, "Attribute `interval` cannot be None"
-        return self._get_historical_step1(
+
+        logger.info(
+            f"kc:historical_data: starting historical data download for instrument_token {instrument_token} with interval '{interval}'"
+        )
+        hist_final_df = self._get_historical_step1(
             instrument_token, from_date, to_date, interval, continuous, oi
         )
+        nb_records = hist_final_df.shape[0]
+        logger.info(
+            f"kc:historical_data: historical data download for instrument_token {instrument_token} with interval '{interval}' completed with #{nb_records} records"
+        )
+        return hist_final_df
 
     @retry(
         stop_max_attempt_number=5,
@@ -336,14 +345,16 @@ class Connect:
             e.g. ("NSE", "BSE", "NFO", "CDS", "BFO", "MCX", "BCD")
         :return: pd.DataFrame: Processed instrument data.
         """
-        logger.info("kc:instruments: getting instruments data from kite api")
+        logger.info("kc:instruments: starting instruments data download from kite api")
         instruments_df = pd.DataFrame(self._instruments(exchange=exchange))
         instruments_df.reset_index(drop=True, inplace=True)
         instruments_df["name"] = instruments_df["name"].replace("", np.nan)
         instruments_df["expiry"] = instruments_df["expiry"].replace("", np.nan)
 
         nb_ins = instruments_df.shape[0]
-        logger.info(f"kc:instruments: fetching #{nb_ins} instruments successful")
+        logger.info(
+            f"kc:instruments: instruments data download completed with #{nb_ins} records"
+        )
         return instruments_df
 
     def positions(self, *args, **kwargs):
