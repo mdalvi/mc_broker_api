@@ -1,0 +1,10 @@
+# Configuration File
+
+# Local settings
+debug: "True"
+timezone: "Asia/Kolkata"
+
+# Zerodha API Settings
+# Replace with your actual Kite API key obtained from your Kite developer account
+kite_api_key: "sk_1234567890abcdefg1234567890abcdefg"
+
